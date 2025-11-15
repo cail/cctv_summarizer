@@ -57,9 +57,9 @@ class CCTVSummarizer:
         
         self._setup_directories()
         
-        # Motion detection parameters
-        self.motion_threshold = 25  # Pixel difference threshold
-        self.min_motion_area = 500  # Minimum area to consider as motion
+        # Default motion detection parameters (can be overridden per camera)
+        self.default_motion_threshold = self.settings.get('motion_threshold', 25)  # Pixel difference threshold
+        self.default_min_motion_area = self.settings.get('min_motion_area', 500)  # Minimum area to consider as motion
         
         # Store previous frames for motion detection
         self.previous_frames = {}
@@ -172,7 +172,7 @@ class CCTVSummarizer:
                 
                 # Check if motion detection is enabled
                 if camera_config.get('track_changes', False):
-                    if not self._has_motion(cam_id, output_file):
+                    if not self._has_motion(cam_id, output_file, debug=False):
                         # No significant motion, delete the frame
                         output_file.unlink()
                         logger.debug(f"No motion detected for {cam_id}, frame deleted")
@@ -190,19 +190,34 @@ class CCTVSummarizer:
             logger.error(f"Error capturing frame from {cam_id}: {e}")
             return None
     
-    def _has_motion(self, cam_id, frame_path):
-        """Detect if there's significant motion in the frame compared to previous"""
+    def _has_motion(self, cam_id, frame_path, debug=False):
+        """Detect if there's significant motion in the frame compared to previous
+        
+        Args:
+            cam_id: Camera identifier
+            frame_path: Path to the current frame
+            debug: If True, output detailed debug information
+        """
+        # Get camera-specific thresholds or use defaults
+        camera_config = self.cameras[cam_id]
+        motion_threshold = camera_config.get('motion_threshold', self.default_motion_threshold)
+        min_motion_area = camera_config.get('min_motion_area', self.default_min_motion_area)
+        
         with self.frame_locks[cam_id]:
             try:
                 # Read current frame
                 current_frame = cv2.imread(str(frame_path), cv2.IMREAD_GRAYSCALE)
                 
                 if current_frame is None:
+                    if debug:
+                        logger.info(f"[{cam_id}] Could not read frame {frame_path}, keeping it")
                     return True  # Keep frame if we can't read it
                 
                 # If no previous frame, keep this one
                 if cam_id not in self.previous_frames:
                     self.previous_frames[cam_id] = current_frame
+                    if debug:
+                        logger.info(f"[{cam_id}] No previous frame, keeping {frame_path.name}")
                     return True
                 
                 # Calculate difference
@@ -217,13 +232,36 @@ class CCTVSummarizer:
                 frame_diff = cv2.absdiff(prev_frame, current_frame)
                 
                 # Threshold the difference
-                _, thresh = cv2.threshold(frame_diff, self.motion_threshold, 255, cv2.THRESH_BINARY)
+                _, thresh = cv2.threshold(frame_diff, motion_threshold, 255, cv2.THRESH_BINARY)
+                
+                # Calculate statistics for debug output
+                if debug:
+                    mean_diff = np.mean(frame_diff)
+                    max_diff = np.max(frame_diff)
+                    pixels_changed = np.count_nonzero(thresh)
+                    total_pixels = thresh.size
+                    change_percentage = (pixels_changed / total_pixels) * 100
                 
                 # Find contours
                 contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 
+                # Get contour areas for debug
+                contour_areas = [cv2.contourArea(c) for c in contours] if contours else []
+                significant_contours = [area for area in contour_areas if area > min_motion_area]
+                
                 # Check if any contour is large enough
-                has_motion = any(cv2.contourArea(c) > self.min_motion_area for c in contours)
+                has_motion = len(significant_contours) > 0
+                
+                if debug:
+                    logger.info(f"[{cam_id}] Frame: {frame_path.name}")
+                    logger.info(f"  Thresholds: motion_threshold={motion_threshold}, min_motion_area={min_motion_area}")
+                    logger.info(f"  Difference stats: mean={mean_diff:.2f}, max={max_diff:.2f}")
+                    logger.info(f"  Changed pixels: {pixels_changed}/{total_pixels} ({change_percentage:.2f}%)")
+                    logger.info(f"  Contours found: {len(contours)}")
+                    if contour_areas:
+                        logger.info(f"  Contour areas: {sorted(contour_areas, reverse=True)[:5]}")  # Show top 5
+                    logger.info(f"  Significant contours (>{min_motion_area}): {len(significant_contours)}")
+                    logger.info(f"  Decision: {'KEEP (motion detected)' if has_motion else 'DISCARD (no motion)'}")
                 
                 # Update previous frame if motion detected
                 if has_motion:
@@ -437,15 +475,86 @@ class CCTVSummarizer:
                 time.sleep(5)  # Wait before retrying
 
 
+    def test_changes(self, cam_id=None):
+        """Test motion detection on existing frames with debug output
+        
+        Args:
+            cam_id: Specific camera to test, or None for all cameras
+        """
+        cameras_to_test = [cam_id] if cam_id else list(self.cameras.keys())
+        
+        for camera_id in cameras_to_test:
+            if camera_id not in self.cameras:
+                logger.error(f"Camera '{camera_id}' not found in config")
+                continue
+            
+            camera_config = self.cameras[camera_id]
+            frames_dir = self.frames_path / camera_id
+            
+            if not frames_dir.exists():
+                logger.warning(f"No frames directory found for {camera_id}")
+                continue
+            
+            frames = sorted(frames_dir.glob('*.jpg'))
+            
+            if len(frames) < 2:
+                logger.warning(f"Not enough frames to test for {camera_id} (found {len(frames)})")
+                continue
+            
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Testing motion detection for camera: {camera_id}")
+            logger.info(f"Total frames: {len(frames)}")
+            logger.info(f"Track changes enabled: {camera_config.get('track_changes', False)}")
+            logger.info(f"{'='*60}\n")
+            
+            # Reset previous frame for this camera
+            if camera_id in self.previous_frames:
+                del self.previous_frames[camera_id]
+            
+            kept_count = 0
+            discarded_count = 0
+            
+            for i, frame_path in enumerate(frames):
+                logger.info(f"\n--- Processing frame {i+1}/{len(frames)} ---")
+                has_motion = self._has_motion(camera_id, frame_path, debug=True)
+                
+                if has_motion:
+                    kept_count += 1
+                else:
+                    discarded_count += 1
+            
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Summary for {camera_id}:")
+            logger.info(f"  Total frames: {len(frames)}")
+            logger.info(f"  Would keep: {kept_count} ({kept_count/len(frames)*100:.1f}%)")
+            logger.info(f"  Would discard: {discarded_count} ({discarded_count/len(frames)*100:.1f}%)")
+            logger.info(f"{'='*60}\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description='CCTV Summarizer - Capture and summarize RTSP camera feeds')
     parser.add_argument('--config', default='config.yaml', help='Path to config file')
     parser.add_argument('--generate-videos', action='store_true', help='Generate videos now and exit')
     parser.add_argument('--test-capture', metavar='CAMERA_ID', help='Test capture from a single camera')
+    parser.add_argument('--test-changes', metavar='CAMERA_ID', nargs='?', const='ALL',
+                        help='Test motion detection on existing frames. Specify camera ID or omit for all cameras')
     
     args = parser.parse_args()
     
     summarizer = CCTVSummarizer(args.config)
+    
+    if args.test_changes:
+        # Test motion detection on existing frames
+        if args.test_changes == 'ALL':
+            logger.info("Testing motion detection on all cameras...")
+            summarizer.test_changes()
+        elif args.test_changes in summarizer.cameras:
+            logger.info(f"Testing motion detection on {args.test_changes}...")
+            summarizer.test_changes(args.test_changes)
+        else:
+            logger.error(f"Camera '{args.test_changes}' not found in config")
+            logger.info(f"Available cameras: {', '.join(summarizer.cameras.keys())}")
+        return
     
     if args.test_capture:
         # Test capture from specific camera

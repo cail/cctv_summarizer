@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=homeassistant
-WorkingDirectory=/Users/igor/Projects/HomeAssistaint/scripts/ha-config/cctv_summarizer
-ExecStart=/usr/bin/python3 /Users/igor/Projects/HomeAssistaint/scripts/ha-config/cctv_summarizer/cctv_summarizer.py
+WorkingDirectory=/home/igor/cctv_summarizer
+ExecStart=/home/igor/cctv_summarizer/venv/bin/python /home/igor/cctv_summarizer/cctv_summarizer.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
