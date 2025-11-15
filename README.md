@@ -2,6 +2,8 @@
 
 A Python tool for capturing frames from RTSP cameras and generating time-lapse summary videos. Ideal for monitoring multiple cameras with activity-focused recording using motion detection.
 
+**IMPORTANT NOTE** Majority of this project was created by Copilot, using my instructions.
+
 ## Features
 
 - **Multi-camera support**: Monitor multiple RTSP cameras simultaneously
@@ -350,6 +352,19 @@ Use the **iframe card** to embed the video player in your dashboard:
 type: iframe
 url: /local/cctv_summaries/videos/front.html
 aspect_ratio: 16:9
+```
+
+**Note** the above static iframe may still cause cacheing issues, you then will see "white" iframe content.
+Here is a solution with dynamic URL generation, which makes Home Assistant to regenerate url on each page load, and therefore caching is not a problem:
+
+```yaml
+type: custom:config-template-card
+entities:
+  - sensor.date_time
+card:
+  type: iframe
+  url: ${'/local/cctv_summaries/videos/park.html?' +new Date().getTime()}
+  refresh_interval: 300
 ```
 
 Or create a grid of camera feeds:
