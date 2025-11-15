@@ -1,0 +1,20 @@
+config:
+    summary_duration: 24h
+    capture_interval: 1m
+    video_generation_interval: 2m
+    output_path: ../ha-config/www/cctv_summaries/
+    video_format: mp4
+    resolution: 720p
+    log_level: DEBUG  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+cameras:
+    front:
+        name: Front Door
+        # track_changes enables motion detection to focus on activity
+        track_changes: true
+        url: rtsp://192.168.1.15:554/user=admin_password=tlJwpbo6_channel=1_stream=0.sdp?real_stream
+    park:
+        name: Parking lot
+        url: rtsp://admin@192.168.1.16/user=admin_password=tlJwpbo6_channel=1_stream=0.sdp?real_stream
+    kotel:
+        name: Kotelnaya
+        url: rtsp://192.168.1.22:554/user=admin_password=tlJwpbo6_channel=1_stream=1&onvif=0.sdp?real_st
