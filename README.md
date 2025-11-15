@@ -73,6 +73,7 @@ cameras:
 - **output_path**: Directory for storing frames and videos
 - **video_format**: Video output format (`mp4`, `avi`, etc.)
 - **resolution**: Video height in pixels (e.g., `720p`, `1080p`)
+- **video_fps**: Frames per second for generated videos (default: `25`) - each captured image becomes one frame
 - **log_level**: Logging verbosity - `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` (default: `INFO`)
 - **track_changes**: Enable motion detection for a camera (saves storage by only keeping frames with activity)
 
@@ -229,9 +230,29 @@ Adjust parameters in `cctv_summarizer.py`:
 
 ## Integration with Home Assistant
 
-The videos are saved to `../www/cctv_summaries/` which maps to Home Assistant's web root. You can view them in:
-- Home Assistant dashboards using iframe or video cards
-- Direct URL access: `http://your-ha-instance/local/cctv_summaries/videos/front/latest.mp4`
+The videos are saved to `../www/cctv_summaries/` which maps to Home Assistant's web root. 
+
+Each camera has a **stable `latest.mp4` link** that always points to the most recently generated video, making it easy to embed in dashboards:
+
+```yaml
+# Home Assistant Lovelace card example
+type: picture-elements
+camera_image: camera.front_door
+elements:
+  - type: image
+    entity: camera.front_door
+    tap_action:
+      action: url
+      url_path: /local/cctv_summaries/videos/front/latest.mp4
+```
+
+Direct URL access:
+- Front camera: `http://your-ha-instance/local/cctv_summaries/videos/front/latest.mp4`
+- Park camera: `http://your-ha-instance/local/cctv_summaries/videos/park/latest.mp4`
+- Kotel camera: `http://your-ha-instance/local/cctv_summaries/videos/kotel/latest.mp4`
+
+Timestamped videos are also available at:
+- `http://your-ha-instance/local/cctv_summaries/videos/front/20231115_120000.mp4`
 
 ## License
 

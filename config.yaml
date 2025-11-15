@@ -5,6 +5,7 @@ config:
     output_path: ../ha-config/www/cctv_summaries/
     video_format: mp4
     resolution: 720p
+    video_fps: 25  # Frames per second for generated videos (default: 25)
     log_level: DEBUG  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
 cameras:
     front:

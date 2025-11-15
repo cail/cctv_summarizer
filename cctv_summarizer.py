@@ -249,14 +249,12 @@ class CCTVSummarizer:
         try:
             with open(input_list, 'w') as f:
                 for frame in frames:
-                    # Write relative path to each frame
-                    f.write(f"file '{frame.name}'\n")
-                    # Duration each frame is displayed (in seconds)
-                    # Based on capture_interval
-                    f.write(f"duration {self.capture_interval}\n")
-                # Add last frame one more time (ffmpeg requirement)
-                if frames:
-                    f.write(f"file '{frames[-1].name}'\n")
+                    # Write absolute path to each frame
+                    f.write(f"file '{frame.absolute()}'\n")
+                # ffmpeg concat demuxer will display each frame for equal time
+            
+            # Get FPS from config (default: 25)
+            video_fps = self.settings.get('video_fps', 25)
             
             # Use ffmpeg to create video
             cmd = [
@@ -264,19 +262,19 @@ class CCTVSummarizer:
                 '-y',
                 '-f', 'concat',
                 '-safe', '0',
-                '-i', str(input_list),
+                '-i', str(input_list.absolute()),
                 '-vf', f"scale=-2:{self.settings.get('resolution', '720p').rstrip('p')}",
+                '-r', str(video_fps),  # Set output frame rate
                 '-c:v', 'libx264',
                 '-preset', 'medium',
                 '-crf', '23',
                 '-pix_fmt', 'yuv420p',
-                str(output_video)
+                str(output_video.absolute())
             ]
             
             logger.info(f"Generating video for {cam_id}...")
             result = subprocess.run(
                 cmd,
-                cwd=frames_dir,  # Run in frames directory for relative paths
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=300
@@ -284,6 +282,19 @@ class CCTVSummarizer:
             
             if result.returncode == 0 and output_video.exists():
                 logger.info(f"Video generated: {output_video}")
+                
+                # Create/update symlink to latest video
+                latest_video = self.videos_path / cam_id / f"latest.{video_format}"
+                try:
+                    # Remove old symlink/file if it exists
+                    if latest_video.exists() or latest_video.is_symlink():
+                        latest_video.unlink()
+                    # Create symlink to the new video
+                    latest_video.symlink_to(output_video.name)
+                    logger.debug(f"Updated latest video link for {cam_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to create latest video link for {cam_id}: {e}")
+                
                 # Cleanup old videos
                 self._cleanup_old_videos(cam_id)
             else:
