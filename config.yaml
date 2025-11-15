@@ -1,6 +1,6 @@
 config:
     summary_duration: 24h
-    capture_interval: 1m
+    capture_interval: 30s
     video_generation_interval: 10m
     output_path: ../ha-config/www/cctv_summaries/
     video_format: mp4
@@ -16,7 +16,8 @@ config:
 cameras:
     front:
         name: Front Door
-        # track_changes enables motion detection to focus on activity
+        # track_changes: when true, only frames with detected motion are included in videos
+        # (all frames are still captured - filtering happens during video generation)
         track_changes: true
         # Optional: Override default motion detection parameters
         # motion_threshold: 30  # Higher = less sensitive to small changes

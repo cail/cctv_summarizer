@@ -75,11 +75,11 @@ cameras:
 - **resolution**: Video height in pixels (e.g., `720p`, `1080p`)
 - **video_fps**: Frames per second for generated videos (default: `25`) - each captured image becomes one frame
 - **log_level**: Logging verbosity - `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` (default: `INFO`)
-- **track_changes**: Enable motion detection for a camera (saves storage by only keeping frames with activity)
+- **track_changes**: Enable motion detection for a camera (applies filtering during video generation - all frames are still captured)
 
 ### Motion Detection Parameters
 
-Motion detection can be configured globally (in `config` section) or per-camera:
+Motion detection filters frames **during video generation**, not during capture. All frames are saved, but only frames with detected motion are included in the generated videos. This allows you to tune parameters without losing data.
 
 ```yaml
 config:
@@ -102,8 +102,14 @@ cameras:
 - **min_motion_area**: Minimum area in pixels for a contour to be considered significant motion. Increase to ignore small movements
 - **blur_kernel**: Apply Gaussian blur before comparison to reduce camera sensor noise. Set to 0 to disable, or use odd numbers (3, 5, 7, 9). Higher values = more smoothing but may miss fine details
 
+**How it works:**
+1. All frames are captured and saved unconditionally
+2. During video generation, if `track_changes: true`, motion detection analyzes each frame
+3. Only frames with detected motion are included in the video
+4. Original frames remain on disk until cleaned up by `summary_duration` setting
+
 **Tuning tips:**
-- If too many similar frames are kept: increase `motion_threshold` or `min_motion_area`
+- If too many similar frames are in videos: increase `motion_threshold` or `min_motion_area`
 - If important motion is missed: decrease `motion_threshold` or `min_motion_area`
 - If camera has noisy sensor (many small contours): increase `blur_kernel` to 7 or 9
 - Use `--test-changes --save-debug-images` to visualize what the algorithm sees
@@ -262,12 +268,21 @@ www/cctv_summaries/
 
 ## How It Works
 
-1. **Frame Capture**: Every `capture_interval` seconds, the tool captures a frame from each camera using ffmpeg
-2. **Motion Detection** (optional): If `track_changes` is enabled, frames are analyzed for motion. Frames without significant changes are discarded
-3. **Storage**: Frames are saved with timestamps in camera-specific subdirectories
-4. **Cleanup**: Old frames beyond `summary_duration` are automatically deleted
-5. **Video Generation**: At the specified interval (default: hourly), a time-lapse video is generated from all captured frames
-6. **Video Cleanup**: Old videos (older than 7 days) are automatically removed
+1. **Frame Capture**: Every `capture_interval` seconds, the tool captures a frame from each camera using ffmpeg - **all frames are saved unconditionally**
+2. **Storage**: Frames are saved with timestamps in camera-specific subdirectories
+3. **Cleanup**: Old frames beyond `summary_duration` are automatically deleted
+4. **Video Generation**: At the specified interval (default: hourly), a time-lapse video is generated:
+   - If `track_changes` is disabled: all captured frames are included
+   - If `track_changes` is enabled: frames are analyzed for motion, only frames with significant changes are included in the video
+5. **Video Cleanup**: Old videos are kept at one per day to save space
+
+### Why Motion Detection at Video Generation?
+
+This design has several advantages:
+- **No data loss**: All captured frames are preserved
+- **Tune anytime**: Adjust motion detection parameters and regenerate videos from existing frames
+- **Debug easily**: Use `--test-changes` to see how different parameters would affect video generation
+- **Flexibility**: Disable motion detection later without losing historical data
 
 ## Troubleshooting
 

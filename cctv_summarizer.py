@@ -170,15 +170,6 @@ class CCTVSummarizer:
             
             if result.returncode == 0 and output_file.exists():
                 logger.debug(f"Captured frame from {cam_id}: {filename}")
-                
-                # Check if motion detection is enabled
-                if camera_config.get('track_changes', False):
-                    if not self._has_motion(cam_id, output_file, debug=False):
-                        # No significant motion, delete the frame
-                        output_file.unlink()
-                        logger.debug(f"No motion detected for {cam_id}, frame deleted")
-                        return None
-                
                 return output_file
             else:
                 logger.warning(f"Failed to capture from {cam_id}: {result.stderr.decode()}")
@@ -350,12 +341,36 @@ class CCTVSummarizer:
     
     def generate_video(self, cam_id):
         """Generate a video from captured frames for a camera"""
+        camera_config = self.cameras[cam_id]
         frames_dir = self.frames_path / cam_id
-        frames = sorted(frames_dir.glob('*.jpg'))
+        all_frames = sorted(frames_dir.glob('*.jpg'))
         
-        if len(frames) < 2:
+        if len(all_frames) < 2:
             logger.info(f"Not enough frames to generate video for {cam_id}")
             return
+        
+        # Apply motion detection filter if enabled
+        if camera_config.get('track_changes', False):
+            logger.info(f"Filtering frames for {cam_id} using motion detection...")
+            # Reset previous frame for motion detection
+            if cam_id in self.previous_frames:
+                del self.previous_frames[cam_id]
+            
+            frames = []
+            discarded_count = 0
+            for frame_path in all_frames:
+                if self._has_motion(cam_id, frame_path, debug=False, save_debug_images=False):
+                    frames.append(frame_path)
+                else:
+                    discarded_count += 1
+            
+            logger.info(f"Motion detection: kept {len(frames)}/{len(all_frames)} frames, discarded {discarded_count}")
+            
+            if len(frames) < 2:
+                logger.info(f"Not enough frames with motion to generate video for {cam_id}")
+                return
+        else:
+            frames = all_frames
         
         # Generate video filename with current timestamp
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -532,6 +547,8 @@ class CCTVSummarizer:
     def test_changes(self, cam_id=None, save_images=False, frame_range=None):
         """Test motion detection on existing frames with debug output
         
+        This simulates the filtering that happens during video generation.
+        
         Args:
             cam_id: Specific camera to test, or None for all cameras
             save_images: If True, save debug visualization images
@@ -591,8 +608,12 @@ class CCTVSummarizer:
             logger.info(f"\n{'='*60}")
             logger.info(f"Summary for {camera_id}:")
             logger.info(f"  Total frames: {len(frames)}")
-            logger.info(f"  Would keep: {kept_count} ({kept_count/len(frames)*100:.1f}%)")
-            logger.info(f"  Would discard: {discarded_count} ({discarded_count/len(frames)*100:.1f}%)")
+            logger.info(f"  Would keep in video: {kept_count} ({kept_count/len(frames)*100:.1f}%)")
+            logger.info(f"  Would skip from video: {discarded_count} ({discarded_count/len(frames)*100:.1f}%)")
+            if camera_config.get('track_changes', False):
+                logger.info(f"  (Motion detection is ENABLED for this camera)")
+            else:
+                logger.info(f"  (Motion detection is DISABLED - all frames would be included)")
             logger.info(f"{'='*60}\n")
 
 
