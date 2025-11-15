@@ -12,6 +12,7 @@ config:
     # Default motion detection thresholds (can be overridden per camera)
     motion_threshold: 25  # Pixel difference threshold (0-255)
     min_motion_area: 500  # Minimum contour area in pixels to consider as motion
+    blur_kernel: 5  # Gaussian blur kernel size to reduce noise (0 to disable, use odd numbers 3,5,7,9)
 cameras:
     front:
         name: Front Door
@@ -19,14 +20,15 @@ cameras:
         track_changes: true
         # Optional: Override default motion detection parameters
         # motion_threshold: 30  # Higher = less sensitive to small changes
-        # min_motion_area: 800  # Higher = only detect larger movements
+        min_motion_area: 800  # Higher = only detect larger movements
+        blur_kernel: 10  # Higher = more noise reduction but may miss small details
         url: rtsp://admin@192.168.1.16/user=admin_password=tlJwpbo6_channel=1_stream=0.sdp?real_stream
     park:
         name: Parking lot
         track_changes: true
         # Optional: Custom thresholds for this camera
         # motion_threshold: 20  # More sensitive to changes
-        # min_motion_area: 300  # Detect smaller movements
+        min_motion_area: 2000  # Detect smaller movements
         url: rtsp://192.168.1.15:554/user=admin_password=tlJwpbo6_channel=1_stream=0.sdp?real_stream
     kotel:
         name: Kotelnaya

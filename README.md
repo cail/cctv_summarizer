@@ -77,6 +77,37 @@ cameras:
 - **log_level**: Logging verbosity - `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` (default: `INFO`)
 - **track_changes**: Enable motion detection for a camera (saves storage by only keeping frames with activity)
 
+### Motion Detection Parameters
+
+Motion detection can be configured globally (in `config` section) or per-camera:
+
+```yaml
+config:
+    # Global defaults
+    motion_threshold: 25      # Pixel difference threshold (0-255, higher = less sensitive)
+    min_motion_area: 500      # Minimum contour area in pixels (higher = only larger movements)
+    blur_kernel: 5            # Gaussian blur to reduce noise (0 to disable, use odd numbers: 3,5,7,9)
+
+cameras:
+    front:
+        track_changes: true
+        # Override defaults for this camera
+        motion_threshold: 30
+        min_motion_area: 800
+        blur_kernel: 7
+```
+
+**Parameters explained:**
+- **motion_threshold**: Pixel brightness difference threshold (0-255). Higher values make it less sensitive to subtle changes
+- **min_motion_area**: Minimum area in pixels for a contour to be considered significant motion. Increase to ignore small movements
+- **blur_kernel**: Apply Gaussian blur before comparison to reduce camera sensor noise. Set to 0 to disable, or use odd numbers (3, 5, 7, 9). Higher values = more smoothing but may miss fine details
+
+**Tuning tips:**
+- If too many similar frames are kept: increase `motion_threshold` or `min_motion_area`
+- If important motion is missed: decrease `motion_threshold` or `min_motion_area`
+- If camera has noisy sensor (many small contours): increase `blur_kernel` to 7 or 9
+- Use `--test-changes --save-debug-images` to visualize what the algorithm sees
+
 ## Usage
 
 ### Run Continuously
@@ -108,6 +139,39 @@ Generate videos from existing frames without starting the capture loop:
 ```bash
 python3 cctv_summarizer.py --generate-videos
 ```
+
+### Test Motion Detection
+
+Test motion detection on existing frames to debug and tune thresholds:
+
+```bash
+# Test all cameras with detailed output
+python3 cctv_summarizer.py --test-changes
+
+# Test specific camera
+python3 cctv_summarizer.py --test-changes front
+
+# Save debug visualization images
+python3 cctv_summarizer.py --test-changes front --save-debug-images
+
+# Test only a range of frames (e.g., frames 10-20)
+python3 cctv_summarizer.py --test-changes front --frame-range 10:20 --save-debug-images
+```
+
+The test mode shows detailed statistics for each frame comparison:
+- Pixel difference statistics (mean, max)
+- Percentage of changed pixels
+- Number of contours detected
+- Areas of significant contours
+- Decision (KEEP or DISCARD)
+
+When using `--save-debug-images`, four visualization images are created for each frame:
+1. **`*_1_diff.jpg`**: Difference between frames (amplified for visibility)
+2. **`*_2_thresh.jpg`**: Thresholded binary image showing changed pixels
+3. **`*_3_all_contours.jpg`**: All detected contours in green
+4. **`*_4_significant.jpg`**: Only significant contours in red with statistics overlay
+
+Debug images are saved to `output_path/debug/camera_id/`.
 
 ### Use Custom Config
 
@@ -217,9 +281,22 @@ If frame capture fails:
 
 ### Motion Detection Too Sensitive/Not Sensitive Enough
 
-Adjust parameters in `cctv_summarizer.py`:
-- `motion_threshold`: Pixel difference threshold (default: 25)
-- `min_motion_area`: Minimum area in pixels to consider as motion (default: 500)
+Use the test mode to debug and tune parameters:
+
+```bash
+# Test and see statistics
+python3 cctv_summarizer.py --test-changes front
+
+# Generate debug images to visualize
+python3 cctv_summarizer.py --test-changes front --save-debug-images --frame-range 0:10
+```
+
+Then adjust parameters in `config.yaml`:
+- `motion_threshold`: Pixel difference threshold (0-255, higher = less sensitive)
+- `min_motion_area`: Minimum contour area in pixels (higher = only larger movements)
+- `blur_kernel`: Gaussian blur size to reduce noise (0 to disable, or 3,5,7,9)
+
+See **Motion Detection Parameters** section above for detailed tuning guidance.
 
 ### High Storage Usage
 

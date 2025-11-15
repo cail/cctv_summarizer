@@ -60,6 +60,7 @@ class CCTVSummarizer:
         # Default motion detection parameters (can be overridden per camera)
         self.default_motion_threshold = self.settings.get('motion_threshold', 25)  # Pixel difference threshold
         self.default_min_motion_area = self.settings.get('min_motion_area', 500)  # Minimum area to consider as motion
+        self.default_blur_kernel = self.settings.get('blur_kernel', 5)  # Gaussian blur kernel size (0 to disable)
         
         # Store previous frames for motion detection
         self.previous_frames = {}
@@ -190,18 +191,20 @@ class CCTVSummarizer:
             logger.error(f"Error capturing frame from {cam_id}: {e}")
             return None
     
-    def _has_motion(self, cam_id, frame_path, debug=False):
+    def _has_motion(self, cam_id, frame_path, debug=False, save_debug_images=False):
         """Detect if there's significant motion in the frame compared to previous
         
         Args:
             cam_id: Camera identifier
             frame_path: Path to the current frame
             debug: If True, output detailed debug information
+            save_debug_images: If True, save visualization images for debugging
         """
         # Get camera-specific thresholds or use defaults
         camera_config = self.cameras[cam_id]
         motion_threshold = camera_config.get('motion_threshold', self.default_motion_threshold)
         min_motion_area = camera_config.get('min_motion_area', self.default_min_motion_area)
+        blur_kernel = camera_config.get('blur_kernel', self.default_blur_kernel)
         
         with self.frame_locks[cam_id]:
             try:
@@ -212,6 +215,12 @@ class CCTVSummarizer:
                     if debug:
                         logger.info(f"[{cam_id}] Could not read frame {frame_path}, keeping it")
                     return True  # Keep frame if we can't read it
+                
+                # Apply Gaussian blur to reduce noise (if enabled)
+                if blur_kernel > 0:
+                    # Ensure kernel size is odd
+                    kernel_size = blur_kernel if blur_kernel % 2 == 1 else blur_kernel + 1
+                    current_frame = cv2.GaussianBlur(current_frame, (kernel_size, kernel_size), 0)
                 
                 # If no previous frame, keep this one
                 if cam_id not in self.previous_frames:
@@ -248,13 +257,14 @@ class CCTVSummarizer:
                 # Get contour areas for debug
                 contour_areas = [cv2.contourArea(c) for c in contours] if contours else []
                 significant_contours = [area for area in contour_areas if area > min_motion_area]
+                significant_contour_objects = [c for c in contours if cv2.contourArea(c) > min_motion_area]
                 
                 # Check if any contour is large enough
                 has_motion = len(significant_contours) > 0
                 
                 if debug:
                     logger.info(f"[{cam_id}] Frame: {frame_path.name}")
-                    logger.info(f"  Thresholds: motion_threshold={motion_threshold}, min_motion_area={min_motion_area}")
+                    logger.info(f"  Thresholds: motion_threshold={motion_threshold}, min_motion_area={min_motion_area}, blur_kernel={blur_kernel}")
                     logger.info(f"  Difference stats: mean={mean_diff:.2f}, max={max_diff:.2f}")
                     logger.info(f"  Changed pixels: {pixels_changed}/{total_pixels} ({change_percentage:.2f}%)")
                     logger.info(f"  Contours found: {len(contours)}")
@@ -262,6 +272,50 @@ class CCTVSummarizer:
                         logger.info(f"  Contour areas: {sorted(contour_areas, reverse=True)[:5]}")  # Show top 5
                     logger.info(f"  Significant contours (>{min_motion_area}): {len(significant_contours)}")
                     logger.info(f"  Decision: {'KEEP (motion detected)' if has_motion else 'DISCARD (no motion)'}")
+                
+                # Save debug visualization images
+                if save_debug_images and has_motion:
+                    debug_dir = self.output_path / 'debug' / cam_id
+                    debug_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    base_name = frame_path.stem
+                    
+                    # Read original color frame for contour overlay
+                    current_frame_color = cv2.imread(str(frame_path))
+                    
+                    # 1. Save the difference image (amplified for visibility)
+                    diff_amplified = cv2.normalize(frame_diff, None, 0, 255, cv2.NORM_MINMAX)
+                    cv2.imwrite(str(debug_dir / f"{base_name}_1_diff.jpg"), diff_amplified)
+                    
+                    # 2. Save the thresholded image
+                    cv2.imwrite(str(debug_dir / f"{base_name}_2_thresh.jpg"), thresh)
+                    
+                    # 3. Save image with ALL contours drawn
+                    all_contours_img = current_frame_color.copy()
+                    cv2.drawContours(all_contours_img, contours, -1, (0, 255, 0), 2)
+                    cv2.imwrite(str(debug_dir / f"{base_name}_3_all_contours.jpg"), all_contours_img)
+                    
+                    # 4. Save image with SIGNIFICANT contours only
+                    sig_contours_img = current_frame_color.copy()
+                    cv2.drawContours(sig_contours_img, significant_contour_objects, -1, (0, 0, 255), 3)
+                    
+                    # Add text overlay with stats
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    y_offset = 30
+                    cv2.putText(sig_contours_img, f"Mean diff: {mean_diff:.2f}", (10, y_offset), font, 0.7, (255, 255, 255), 2)
+                    y_offset += 30
+                    cv2.putText(sig_contours_img, f"Max diff: {max_diff:.2f}", (10, y_offset), font, 0.7, (255, 255, 255), 2)
+                    y_offset += 30
+                    cv2.putText(sig_contours_img, f"Changed: {change_percentage:.2f}%", (10, y_offset), font, 0.7, (255, 255, 255), 2)
+                    y_offset += 30
+                    cv2.putText(sig_contours_img, f"Contours: {len(contours)} ({len(significant_contours)} sig)", (10, y_offset), font, 0.7, (255, 255, 255), 2)
+                    y_offset += 30
+                    cv2.putText(sig_contours_img, f"Decision: {'KEEP' if has_motion else 'DISCARD'}", (10, y_offset), font, 0.7, (0, 255, 0) if has_motion else (0, 0, 255), 2)
+                    
+                    cv2.imwrite(str(debug_dir / f"{base_name}_4_significant.jpg"), sig_contours_img)
+                    
+                    if debug:
+                        logger.info(f"  Debug images saved to: {debug_dir}")
                 
                 # Update previous frame if motion detected
                 if has_motion:
@@ -475,11 +529,13 @@ class CCTVSummarizer:
                 time.sleep(5)  # Wait before retrying
 
 
-    def test_changes(self, cam_id=None):
+    def test_changes(self, cam_id=None, save_images=False, frame_range=None):
         """Test motion detection on existing frames with debug output
         
         Args:
             cam_id: Specific camera to test, or None for all cameras
+            save_images: If True, save debug visualization images
+            frame_range: Tuple of (start, end) frame indices to process, or None for all frames
         """
         cameras_to_test = [cam_id] if cam_id else list(self.cameras.keys())
         
@@ -501,10 +557,19 @@ class CCTVSummarizer:
                 logger.warning(f"Not enough frames to test for {camera_id} (found {len(frames)})")
                 continue
             
+            # Apply frame range filter if specified
+            if frame_range:
+                start_idx, end_idx = frame_range
+                frames = frames[start_idx:end_idx]
+                logger.info(f"Processing frame range: {start_idx} to {end_idx}")
+            
             logger.info(f"\n{'='*60}")
             logger.info(f"Testing motion detection for camera: {camera_id}")
-            logger.info(f"Total frames: {len(frames)}")
+            logger.info(f"Total frames to process: {len(frames)}")
             logger.info(f"Track changes enabled: {camera_config.get('track_changes', False)}")
+            if save_images:
+                debug_dir = self.output_path / 'debug' / camera_id
+                logger.info(f"Debug images will be saved to: {debug_dir}")
             logger.info(f"{'='*60}\n")
             
             # Reset previous frame for this camera
@@ -516,7 +581,7 @@ class CCTVSummarizer:
             
             for i, frame_path in enumerate(frames):
                 logger.info(f"\n--- Processing frame {i+1}/{len(frames)} ---")
-                has_motion = self._has_motion(camera_id, frame_path, debug=True)
+                has_motion = self._has_motion(camera_id, frame_path, debug=True, save_debug_images=save_images)
                 
                 if has_motion:
                     kept_count += 1
@@ -538,19 +603,34 @@ def main():
     parser.add_argument('--test-capture', metavar='CAMERA_ID', help='Test capture from a single camera')
     parser.add_argument('--test-changes', metavar='CAMERA_ID', nargs='?', const='ALL',
                         help='Test motion detection on existing frames. Specify camera ID or omit for all cameras')
+    parser.add_argument('--save-debug-images', action='store_true',
+                        help='Save debug visualization images when using --test-changes')
+    parser.add_argument('--frame-range', metavar='START:END', type=str,
+                        help='Process only frames in range (e.g., 10:20 for frames 10-20). Use with --test-changes')
     
     args = parser.parse_args()
     
     summarizer = CCTVSummarizer(args.config)
     
     if args.test_changes:
+        # Parse frame range if provided
+        frame_range = None
+        if args.frame_range:
+            try:
+                start, end = args.frame_range.split(':')
+                frame_range = (int(start), int(end))
+                logger.info(f"Frame range filter: {frame_range[0]} to {frame_range[1]}")
+            except Exception as e:
+                logger.error(f"Invalid frame range format: {args.frame_range}. Use START:END (e.g., 10:20)")
+                return
+        
         # Test motion detection on existing frames
         if args.test_changes == 'ALL':
             logger.info("Testing motion detection on all cameras...")
-            summarizer.test_changes()
+            summarizer.test_changes(save_images=args.save_debug_images, frame_range=frame_range)
         elif args.test_changes in summarizer.cameras:
             logger.info(f"Testing motion detection on {args.test_changes}...")
-            summarizer.test_changes(args.test_changes)
+            summarizer.test_changes(args.test_changes, save_images=args.save_debug_images, frame_range=frame_range)
         else:
             logger.error(f"Camera '{args.test_changes}' not found in config")
             logger.info(f"Available cameras: {', '.join(summarizer.cameras.keys())}")
