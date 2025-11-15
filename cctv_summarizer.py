@@ -46,6 +46,15 @@ class CCTVSummarizer:
         self.frames_path = self.output_path / 'frames'
         self.videos_path = self.output_path / 'videos'
         
+        # iframe template settings
+        self.iframe_template_path = self.settings.get('iframe_template')
+        self.iframe_template = None
+        if self.iframe_template_path:
+            self._load_iframe_template()
+        
+        # Option to create latest.mp4 symlink (disabled by default due to caching issues)
+        self.create_latest_link = self.settings.get('create_latest_link', False)
+        
         self._setup_directories()
         
         # Motion detection parameters
@@ -88,6 +97,24 @@ class CCTVSummarizer:
         )
         
         logger.info(f"Logging configured at {log_level_str} level")
+    
+    def _load_iframe_template(self):
+        """Load iframe template file if specified"""
+        try:
+            template_path = Path(self.iframe_template_path)
+            if not template_path.is_absolute():
+                # Make path relative to script directory
+                script_dir = Path(__file__).parent
+                template_path = script_dir / template_path
+            
+            if template_path.exists():
+                with open(template_path, 'r') as f:
+                    self.iframe_template = f.read()
+                logger.info(f"Loaded iframe template from {template_path}")
+            else:
+                logger.warning(f"Iframe template file not found: {template_path}")
+        except Exception as e:
+            logger.error(f"Failed to load iframe template: {e}")
     
     def _parse_duration(self, duration_str):
         """Parse duration string like '24h', '1m', '30s' into seconds"""
@@ -283,17 +310,22 @@ class CCTVSummarizer:
             if result.returncode == 0 and output_video.exists():
                 logger.info(f"Video generated: {output_video}")
                 
-                # Create/update symlink to latest video
-                latest_video = self.videos_path / cam_id / f"latest.{video_format}"
-                try:
-                    # Remove old symlink/file if it exists
-                    if latest_video.exists() or latest_video.is_symlink():
-                        latest_video.unlink()
-                    # Create symlink to the new video
-                    latest_video.symlink_to(output_video.name)
-                    logger.debug(f"Updated latest video link for {cam_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to create latest video link for {cam_id}: {e}")
+                # Generate iframe HTML file if template is configured
+                if self.iframe_template:
+                    self._generate_iframe_html(cam_id, output_video)
+                
+                # Create/update symlink to latest video (optional, disabled by default)
+                if self.create_latest_link:
+                    latest_video = self.videos_path / cam_id / f"latest.{video_format}"
+                    try:
+                        # Remove old symlink/file if it exists
+                        if latest_video.exists() or latest_video.is_symlink():
+                            latest_video.unlink()
+                        # Create symlink to the new video
+                        latest_video.symlink_to(output_video.name)
+                        logger.debug(f"Updated latest video link for {cam_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create latest video link for {cam_id}: {e}")
                 
                 # Cleanup old videos
                 self._cleanup_old_videos(cam_id)
@@ -306,6 +338,26 @@ class CCTVSummarizer:
             # Cleanup input list file
             if input_list.exists():
                 input_list.unlink()
+    
+    def _generate_iframe_html(self, cam_id, video_path):
+        """Generate an HTML file with iframe pointing to the video"""
+        try:
+            # Get relative path from videos directory to the video file
+            # Format: cam_id/timestamp.mp4
+            relative_video_path = f"{cam_id}/{video_path.name}"
+            
+            # Replace placeholders in template (support both formats)
+            html_content = self.iframe_template.replace('{{video_path}}', relative_video_path)
+            html_content = html_content.replace('$RELPATH', relative_video_path)
+            
+            # Write HTML file in videos directory with camera id as filename
+            html_file = self.videos_path / f"{cam_id}.html"
+            with open(html_file, 'w') as f:
+                f.write(html_content)
+            
+            logger.info(f"Generated iframe HTML for {cam_id}: {html_file}")
+        except Exception as e:
+            logger.error(f"Failed to generate iframe HTML for {cam_id}: {e}")
     
     def _cleanup_old_videos(self, cam_id):
         """Remove old video files to save space (keep one video per previous day)"""

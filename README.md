@@ -230,29 +230,83 @@ Adjust parameters in `cctv_summarizer.py`:
 
 ## Integration with Home Assistant
 
-The videos are saved to `../www/cctv_summaries/` which maps to Home Assistant's web root. 
+The tool generates HTML files with embedded video players for each camera, which can be directly integrated into Home Assistant dashboards using iframe cards.
 
-Each camera has a **stable `latest.mp4` link** that always points to the most recently generated video, making it easy to embed in dashboards:
+### Why HTML Files Instead of Direct MP4?
 
+Home Assistant's `image` element doesn't support MP4 video playback. The solution is to use iframe cards that load HTML files containing video players.
+
+### Configuration
+
+The tool automatically generates HTML files for each camera:
+- `front.html`, `park.html`, `kotel.html` in the `videos/` directory
+- Each HTML file contains a video player pointing to the latest generated video
+- Videos are stored in `output_path/videos/camera_id/` (default: `../ha-config/www/cctv_summaries/videos/`)
+
+Configure in `config.yaml`:
 ```yaml
-# Home Assistant Lovelace card example
-type: picture-elements
-camera_image: camera.front_door
-elements:
-  - type: image
-    entity: camera.front_door
-    tap_action:
-      action: url
-      url_path: /local/cctv_summaries/videos/front/latest.mp4
+config:
+    iframe_template: iframe.html    # Template file for HTML generation
+    create_latest_link: false       # Optional: create latest.mp4 symlink (may cause caching issues)
 ```
 
-Direct URL access:
-- Front camera: `http://your-ha-instance/local/cctv_summaries/videos/front/latest.mp4`
-- Park camera: `http://your-ha-instance/local/cctv_summaries/videos/park/latest.mp4`
-- Kotel camera: `http://your-ha-instance/local/cctv_summaries/videos/kotel/latest.mp4`
+### Home Assistant Dashboard Integration
 
-Timestamped videos are also available at:
-- `http://your-ha-instance/local/cctv_summaries/videos/front/20231115_120000.mp4`
+Use the **iframe card** to embed the video player in your dashboard:
+
+```yaml
+type: iframe
+url: /local/cctv_summaries/videos/front.html
+aspect_ratio: 16:9
+```
+
+Or create a grid of camera feeds:
+
+```yaml
+type: horizontal-stack
+cards:
+  - type: iframe
+    url: /local/cctv_summaries/videos/front.html
+    aspect_ratio: 16:9
+  - type: iframe
+    url: /local/cctv_summaries/videos/park.html
+    aspect_ratio: 16:9
+  - type: iframe
+    url: /local/cctv_summaries/videos/kotel.html
+    aspect_ratio: 16:9
+```
+
+### How It Works
+
+1. When a new video is generated, the tool updates the corresponding HTML file
+2. The HTML file contains a relative path to the latest video (e.g., `front/20251115_163003.mp4`)
+3. Home Assistant's iframe card loads the HTML file, which plays the video
+4. Each video generation updates the HTML file with the new video path
+5. Browsers cache-bust automatically since the video filename includes a timestamp
+
+### Customizing the Video Player
+
+Edit `iframe.html` template to customize the video player:
+
+```html
+<video autoplay muted loop playsinline style="width:100%;height:100%;object-fit:cover;">
+  <source src="$RELPATH" type="video/mp4">
+</video>
+```
+
+Available placeholders:
+- `$RELPATH` or `{{video_path}}` - relative path to the video file
+
+### Alternative: Direct MP4 Access (Optional)
+
+If you enable `create_latest_link: true` in config, a `latest.mp4` symlink is created for each camera. However, this may cause browser caching issues where old videos continue to display.
+
+Direct URLs (if enabled):
+- `http://your-ha-instance/local/cctv_summaries/videos/front/latest.mp4`
+- `http://your-ha-instance/local/cctv_summaries/videos/park/latest.mp4`
+
+Timestamped videos are always available:
+- `http://your-ha-instance/local/cctv_summaries/videos/front/20251115_163003.mp4`
 
 ## License
 
