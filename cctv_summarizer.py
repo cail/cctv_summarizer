@@ -308,24 +308,52 @@ class CCTVSummarizer:
                 input_list.unlink()
     
     def _cleanup_old_videos(self, cam_id):
-        """Remove old video files to save space (keep last 7 days)"""
+        """Remove old video files to save space (keep one video per previous day)"""
         videos_dir = self.videos_path / cam_id
-        cutoff_time = datetime.now() - timedelta(days=7)
         
-        deleted_count = 0
+        # Get all video files and parse their dates
+        video_files = []
         for video_file in videos_dir.glob('*.mp4'):
+            # Skip the 'latest.mp4' symlink
+            if video_file.name.startswith('latest.'):
+                continue
+                
             try:
                 timestamp_str = video_file.stem
                 video_time = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
-                
-                if video_time < cutoff_time:
-                    video_file.unlink()
-                    deleted_count += 1
+                video_files.append((video_file, video_time))
             except Exception as e:
                 logger.debug(f"Error processing {video_file}: {e}")
         
+        if not video_files:
+            return
+        
+        # Sort by timestamp (newest first)
+        video_files.sort(key=lambda x: x[1], reverse=True)
+        
+        # Group videos by date
+        videos_by_date = {}
+        for video_file, video_time in video_files:
+            date_key = video_time.date()
+            if date_key not in videos_by_date:
+                videos_by_date[date_key] = []
+            videos_by_date[date_key].append(video_file)
+        
+        # For each day, keep only the newest video and delete the rest
+        deleted_count = 0
+        for date_key in sorted(videos_by_date.keys()):
+            daily_videos = videos_by_date[date_key]
+            # Keep the first (newest) video, delete the rest
+            for video_file in daily_videos[1:]:
+                try:
+                    video_file.unlink()
+                    deleted_count += 1
+                    logger.debug(f"Deleted older same-day video: {video_file.name}")
+                except Exception as e:
+                    logger.error(f"Error deleting {video_file}: {e}")
+        
         if deleted_count > 0:
-            logger.info(f"Cleaned up {deleted_count} old videos from {cam_id}")
+            logger.info(f"Cleaned up {deleted_count} old same-day videos from {cam_id}")
     
     def capture_loop(self):
         """Main loop for capturing frames"""
