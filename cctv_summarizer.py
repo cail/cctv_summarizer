@@ -52,6 +52,12 @@ class CCTVSummarizer:
         if self.iframe_template_path:
             self._load_iframe_template()
         
+        # history template settings
+        self.history_template_path = self.settings.get('history_template', 'history.html')
+        self.history_template = None
+        if self.history_template_path:
+            self._load_history_template()
+        
         # Option to create latest.mp4 symlink (disabled by default due to caching issues)
         self.create_latest_link = self.settings.get('create_latest_link', False)
         
@@ -116,6 +122,24 @@ class CCTVSummarizer:
                 logger.warning(f"Iframe template file not found: {template_path}")
         except Exception as e:
             logger.error(f"Failed to load iframe template: {e}")
+    
+    def _load_history_template(self):
+        """Load history template file if specified"""
+        try:
+            template_path = Path(self.history_template_path)
+            if not template_path.is_absolute():
+                # Make path relative to script directory
+                script_dir = Path(__file__).parent
+                template_path = script_dir / template_path
+            
+            if template_path.exists():
+                with open(template_path, 'r') as f:
+                    self.history_template = f.read()
+                logger.info(f"Loaded history template from {template_path}")
+            else:
+                logger.warning(f"History template file not found: {template_path}")
+        except Exception as e:
+            logger.error(f"Failed to load history template: {e}")
     
     def _parse_duration(self, duration_str):
         """Parse duration string like '24h', '1m', '30s' into seconds"""
@@ -420,6 +444,7 @@ class CCTVSummarizer:
                 # Generate iframe HTML file if template is configured
                 if self.iframe_template:
                     self._generate_iframe_html(cam_id, output_video)
+                    self._generate_history_html(cam_id)
                 
                 # Create/update symlink to latest video (optional, disabled by default)
                 if self.create_latest_link:
@@ -465,6 +490,80 @@ class CCTVSummarizer:
             logger.info(f"Generated iframe HTML for {cam_id}: {html_file}")
         except Exception as e:
             logger.error(f"Failed to generate iframe HTML for {cam_id}: {e}")
+    
+    def _generate_history_html(self, cam_id):
+        """Generate a history HTML file showing all previous day videos for a camera"""
+        try:
+            if not self.iframe_template or not self.history_template:
+                logger.debug(f"Templates not configured, skipping history HTML for {cam_id}")
+                return
+            
+            videos_dir = self.videos_path / cam_id
+            
+            # Get all video files and parse their dates
+            video_files = []
+            for video_file in videos_dir.glob('*.mp4'):
+                # Skip the 'latest.mp4' symlink
+                if video_file.name.startswith('latest.'):
+                    continue
+                    
+                try:
+                    timestamp_str = video_file.stem
+                    video_time = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                    video_files.append((video_file, video_time))
+                except Exception as e:
+                    logger.debug(f"Error processing {video_file}: {e}")
+            
+            if not video_files:
+                logger.debug(f"No video files found for {cam_id} history")
+                return
+            
+            # Sort by timestamp (newest first)
+            video_files.sort(key=lambda x: x[1], reverse=True)
+            
+            # Group videos by date and keep only one per day (the newest)
+            videos_by_date = {}
+            for video_file, video_time in video_files:
+                date_key = video_time.date()
+                if date_key not in videos_by_date:
+                    videos_by_date[date_key] = (video_file, video_time)
+            
+            # Generate video sections HTML
+            video_sections = []
+            for date_key in sorted(videos_by_date.keys(), reverse=True):
+                video_file, video_time = videos_by_date[date_key]
+                relative_video_path = f"{cam_id}/{video_file.name}"
+                
+                # Format date nicely
+                date_str = video_time.strftime('%A, %B %d, %Y')
+                time_str = video_time.strftime('%I:%M %p')
+                
+                # Generate video player from iframe template
+                video_player = self.iframe_template.replace('{{video_path}}', relative_video_path)
+                video_player = video_player.replace('$RELPATH', relative_video_path)
+                
+                # Build video section
+                section = f'''<div class="video-container">
+<div class="video-date">{date_str} - Generated at {time_str}</div>
+<div class="video-wrapper">
+{video_player}
+</div>
+</div>'''
+                video_sections.append(section)
+            
+            # Generate final HTML from history template
+            camera_name = self.cameras[cam_id].get('name', cam_id)
+            html_content = self.history_template.replace('$CAMERA_NAME', camera_name)
+            html_content = html_content.replace('$VIDEO_SECTIONS', '\n'.join(video_sections))
+            
+            # Write history HTML file
+            history_file = self.videos_path / f"{cam_id}-history.html"
+            with open(history_file, 'w') as f:
+                f.write(html_content)
+            
+            logger.info(f"Generated history HTML for {cam_id}: {history_file} ({len(videos_by_date)} videos)")
+        except Exception as e:
+            logger.error(f"Failed to generate history HTML for {cam_id}: {e}")
     
     def _cleanup_old_videos(self, cam_id):
         """Remove old video files to save space (keep one video per previous day)"""

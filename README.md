@@ -337,7 +337,11 @@ Home Assistant's `image` element doesn't support MP4 video playback. The solutio
 ### Configuration
 
 The tool automatically generates HTML files for each camera:
-- `front.html`, `park.html`, `kotel.html` in the `videos/` directory
+- `camera.html` - Latest video for the camera (e.g., `front.html`, `park.html`)
+- `camera-history.html` - All previous day videos in chronological order (e.g., `front-history.html`)
+- Videos are stored in `output_path/videos/camera_id/` (default: `../ha-config/www/cctv_summaries/videos/`)
+
+The history file shows one video per day (the most recent one generated that day), with videos displayed newest first.
 - Each HTML file contains a video player pointing to the latest generated video
 - Videos are stored in `output_path/videos/camera_id/` (default: `../ha-config/www/cctv_summaries/videos/`)
 
@@ -352,9 +356,17 @@ config:
 
 Use the **iframe card** to embed the video player in your dashboard:
 
+**Latest video:**
 ```yaml
 type: iframe
 url: /local/cctv_summaries/videos/front.html
+aspect_ratio: 16:9
+```
+
+**Video history (shows all previous days):**
+```yaml
+type: iframe
+url: /local/cctv_summaries/videos/front-history.html
 aspect_ratio: 16:9
 ```
 
