@@ -17,9 +17,7 @@ cameras:
     front:
         name: Front Door
         # track_changes: when true, only frames with detected motion are included in videos
-        # (all frames are still captured - filtering happens during video generation)
         track_changes: true
-        # Optional: Override default motion detection parameters
         # motion_threshold: 30  # Higher = less sensitive to small changes
         min_motion_area: 800  # Higher = only detect larger movements
         blur_kernel: 10  # Higher = more noise reduction but may miss small details
@@ -27,10 +25,25 @@ cameras:
     park:
         name: Parking lot
         track_changes: true
-        # Optional: Custom thresholds for this camera
-        # motion_threshold: 20  # More sensitive to changes
         min_motion_area: 2000  # Detect smaller movements
         url: rtsp://192.168.1.15:554/user=admin_password=tlJwpbo6_channel=1_stream=0.sdp?real_stream
+    side1:
+        name: Side 1
+        track_changes: true
+        min_motion_area: 2000
+        url: rtsp://192.168.1.12:554/user=admin_password=tlJwpbo6_channel=1_stream=0.sdp?real_stream
+    side2:
+        name: Side 1
+        track_changes: true
+        min_motion_area: 2000
+        url: rtsp://192.168.1.13:554/user=admin_password=tlJwpbo6_channel=1_stream=0.sdp?real_stream
+    back:
+        name: Back yard
+        track_changes: true
+        min_motion_area: 2000
+        url: rtsp://192.168.1.14:554/user=admin_password=tlJwpbo6_channel=1_stream=0.sdp?real_stream
     kotel:
         name: Kotelnaya
+        track_changes: true
+        min_motion_area: 100
         url: rtsp://192.168.1.22:554/user=admin_password=tlJwpbo6_channel=1_stream=1&onvif=0.sdp?real_st
