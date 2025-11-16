@@ -620,7 +620,8 @@ class CCTVSummarizer:
 def main():
     parser = argparse.ArgumentParser(description='CCTV Summarizer - Capture and summarize RTSP camera feeds')
     parser.add_argument('--config', default='config.yaml', help='Path to config file')
-    parser.add_argument('--generate-videos', action='store_true', help='Generate videos now and exit')
+    parser.add_argument('--generate-videos', metavar='CAMERA_ID', nargs='?', const='ALL',
+                        help='Generate videos now and exit. Specify camera ID or omit for all cameras')
     parser.add_argument('--test-capture', metavar='CAMERA_ID', help='Test capture from a single camera')
     parser.add_argument('--test-changes', metavar='CAMERA_ID', nargs='?', const='ALL',
                         help='Test motion detection on existing frames. Specify camera ID or omit for all cameras')
@@ -673,10 +674,17 @@ def main():
         return
     
     if args.generate_videos:
-        # Generate videos for all cameras and exit
-        logger.info("Generating videos for all cameras...")
-        for cam_id in summarizer.cameras.keys():
-            summarizer.generate_video(cam_id)
+        # Generate videos for specified camera(s)
+        if args.generate_videos == 'ALL':
+            logger.info("Generating videos for all cameras...")
+            for cam_id in summarizer.cameras.keys():
+                summarizer.generate_video(cam_id)
+        elif args.generate_videos in summarizer.cameras:
+            logger.info(f"Generating video for {args.generate_videos}...")
+            summarizer.generate_video(args.generate_videos)
+        else:
+            logger.error(f"Camera '{args.generate_videos}' not found in config")
+            logger.info(f"Available cameras: {', '.join(summarizer.cameras.keys())}")
         return
     
     # Run continuous capture loop

@@ -145,7 +145,11 @@ python3 cctv_summarizer.py --test-capture front
 Generate videos from existing frames without starting the capture loop:
 
 ```bash
+# Generate videos for all cameras
 python3 cctv_summarizer.py --generate-videos
+
+# Generate video for a specific camera
+python3 cctv_summarizer.py --generate-videos front
 ```
 
 ### Test Motion Detection
