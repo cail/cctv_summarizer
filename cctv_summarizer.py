@@ -67,6 +67,7 @@ class CCTVSummarizer:
         self.default_motion_threshold = self.settings.get('motion_threshold', 25)  # Pixel difference threshold
         self.default_min_motion_area = self.settings.get('min_motion_area', 500)  # Minimum area to consider as motion
         self.default_blur_kernel = self.settings.get('blur_kernel', 5)  # Gaussian blur kernel size (0 to disable)
+        self.default_average_filter = self.settings.get('average_filter', 1)  # Number of frames to average (1 = no averaging)
         
         # Store previous frames for motion detection
         self.previous_frames = {}
@@ -166,13 +167,69 @@ class CCTVSummarizer:
             (self.videos_path / cam_id).mkdir(exist_ok=True)
     
     def capture_frame(self, cam_id, camera_config):
-        """Capture a single frame from a camera using ffmpeg"""
+        """Capture a single frame from a camera using ffmpeg
+        
+        If average_filter > 1, captures multiple frames and averages them to reduce temporal noise
+        """
         timestamp = datetime.now()
         filename = timestamp.strftime('%Y%m%d_%H%M%S.jpg')
         output_file = self.frames_path / cam_id / filename
         
         rtsp_url = camera_config['url']
         
+        # Get average_filter setting (camera-specific or default)
+        average_filter = camera_config.get('average_filter', self.default_average_filter)
+        
+        # If average_filter is 1, use the original single-frame capture
+        if average_filter <= 1:
+            return self._capture_single_frame(cam_id, rtsp_url, output_file)
+        
+        # If average_filter > 1, capture multiple frames and average them
+        logger.debug(f"Capturing {average_filter} frames from {cam_id} for averaging")
+        
+        frames = []
+        for i in range(average_filter):
+            # Capture frame to temporary location
+            temp_file = self.frames_path / cam_id / f"temp_{timestamp.strftime('%Y%m%d_%H%M%S')}_{i}.jpg"
+            
+            result_file = self._capture_single_frame(cam_id, rtsp_url, temp_file)
+            
+            if result_file and result_file.exists():
+                # Read the frame
+                frame = cv2.imread(str(result_file))
+                if frame is not None:
+                    frames.append(frame)
+                # Delete temporary file
+                try:
+                    result_file.unlink()
+                except Exception as e:
+                    logger.warning(f"Failed to delete temp file {result_file}: {e}")
+            else:
+                logger.warning(f"Failed to capture frame {i+1}/{average_filter} from {cam_id}")
+        
+        # If we didn't get any frames, return None
+        if not frames:
+            logger.error(f"No frames captured from {cam_id} for averaging")
+            return None
+        
+        # If we only got one frame, save it directly
+        if len(frames) == 1:
+            cv2.imwrite(str(output_file), frames[0])
+            logger.debug(f"Only 1 frame captured from {cam_id}, saved without averaging")
+            return output_file
+        
+        # Average the frames
+        logger.debug(f"Averaging {len(frames)} frames from {cam_id}")
+        averaged_frame = np.mean(frames, axis=0).astype(np.uint8)
+        
+        # Save the averaged frame
+        cv2.imwrite(str(output_file), averaged_frame)
+        logger.debug(f"Captured and averaged frame from {cam_id}: {filename}")
+        
+        return output_file
+    
+    def _capture_single_frame(self, cam_id, rtsp_url, output_file):
+        """Internal method to capture a single frame using ffmpeg"""
         # Use ffmpeg to capture a single frame
         cmd = [
             'ffmpeg',
@@ -193,7 +250,6 @@ class CCTVSummarizer:
             )
             
             if result.returncode == 0 and output_file.exists():
-                logger.debug(f"Captured frame from {cam_id}: {filename}")
                 return output_file
             else:
                 logger.warning(f"Failed to capture from {cam_id}: {result.stderr.decode()}")

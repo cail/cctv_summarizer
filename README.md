@@ -77,6 +77,7 @@ cameras:
 - **resolution**: Video height in pixels (e.g., `720p`, `1080p`)
 - **video_fps**: Frames per second for generated videos (default: `25`) - each captured image becomes one frame
 - **log_level**: Logging verbosity - `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` (default: `INFO`)
+- **average_filter**: Number of frames to capture and average together (default: `1` = no averaging). When set to > 1, multiple frames are captured immediately and blended into one averaged image, reducing temporal noise like rain, snow, or flickering
 - **track_changes**: Enable motion detection for a camera (applies filtering during video generation - all frames are still captured)
 
 ### Motion Detection Parameters
@@ -89,6 +90,7 @@ config:
     motion_threshold: 25      # Pixel difference threshold (0-255, higher = less sensitive)
     min_motion_area: 500      # Minimum contour area in pixels (higher = only larger movements)
     blur_kernel: 5            # Gaussian blur to reduce noise (0 to disable, use odd numbers: 3,5,7,9)
+    average_filter: 1         # Number of frames to average (1 = disabled, 3-5 recommended for noisy conditions)
 
 cameras:
     front:
@@ -97,12 +99,14 @@ cameras:
         motion_threshold: 30
         min_motion_area: 800
         blur_kernel: 7
+        average_filter: 3     # Capture and average 3 frames to reduce rain/snow/flicker
 ```
 
 **Parameters explained:**
 - **motion_threshold**: Pixel brightness difference threshold (0-255). Higher values make it less sensitive to subtle changes
 - **min_motion_area**: Minimum area in pixels for a contour to be considered significant motion. Increase to ignore small movements
 - **blur_kernel**: Apply Gaussian blur before comparison to reduce camera sensor noise. Set to 0 to disable, or use odd numbers (3, 5, 7, 9). Higher values = more smoothing but may miss fine details
+- **average_filter**: Number of frames to capture and blend together (1 = no averaging). When set to 2 or higher, the system captures multiple frames immediately (without delay) and averages them into a single image. This significantly reduces temporal noise such as rain, snow, flickering lights, or sensor noise. Recommended values: 3-5 for moderate noise, 7-10 for heavy rain/snow. Higher values increase capture time
 
 **How it works:**
 1. All frames are captured and saved unconditionally
@@ -114,7 +118,48 @@ cameras:
 - If too many similar frames are in videos: increase `motion_threshold` or `min_motion_area`
 - If important motion is missed: decrease `motion_threshold` or `min_motion_area`
 - If camera has noisy sensor (many small contours): increase `blur_kernel` to 7 or 9
+- If temporal noise (rain, snow, flickering): enable `average_filter` with values 3-5
+- If heavy rain/snow: increase `average_filter` to 7-10 (note: increases capture time)
 - Use `--test-changes --save-debug-images` to visualize what the algorithm sees
+
+### Temporal Noise Reduction (average_filter)
+
+The `average_filter` parameter helps eliminate temporal noise from captured frames by averaging multiple exposures:
+
+**When to use:**
+- Rain or snow visible in frames
+- Flickering lights or reflections
+- Camera sensor noise (grainy images in low light)
+- Transient objects you want to filter out (birds, insects)
+
+**How it works:**
+1. When `average_filter` is set to a value > 1 (e.g., 3), the system captures that many frames immediately in succession
+2. All frames are loaded into memory and averaged pixel-by-pixel using NumPy
+3. The resulting averaged frame is saved as the final capture
+4. Temporary frames are discarded
+
+**Performance considerations:**
+- Each capture takes proportionally longer (average_filter=3 means 3× the capture time)
+- Requires more CPU and memory during capture (frames loaded into memory)
+- Does NOT affect storage (only the final averaged frame is saved)
+
+**Recommended values:**
+- `1` - No averaging (default, fastest)
+- `3` - Light temporal noise reduction (good balance)
+- `5` - Moderate noise reduction (recommended for rain/snow)
+- `7-10` - Heavy noise reduction (use for severe conditions)
+
+**Example configuration:**
+```yaml
+config:
+    average_filter: 3  # Global default for all cameras
+
+cameras:
+    outdoor:
+        average_filter: 5  # This camera needs more noise reduction
+    indoor:
+        average_filter: 1  # Indoor camera doesn't need averaging
+```
 
 ## Usage
 

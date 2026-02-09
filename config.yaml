@@ -13,6 +13,7 @@ config:
     motion_threshold: 25  # Pixel difference threshold (0-255)
     min_motion_area: 500  # Minimum contour area in pixels to consider as motion
     blur_kernel: 5  # Gaussian blur kernel size to reduce noise (0 to disable, use odd numbers 3,5,7,9)
+    average_filter: 5  # Number of frames to capture and average (1 = no averaging, >1 reduces temporal noise like rain/snow)
 cameras:
     front:
         name: Front Door
@@ -21,6 +22,7 @@ cameras:
         # motion_threshold: 30  # Higher = less sensitive to small changes
         min_motion_area: 800  # Higher = only detect larger movements
         blur_kernel: 10  # Higher = more noise reduction but may miss small details
+        # average_filter: 3  # Capture and average 3 frames to reduce temporal noise (uncomment to enable)
         url: rtsp://admin@192.168.1.16/user=admin_password=tlJwpbo6_channel=1_stream=0.sdp?real_stream
     park:
         name: Parking lot
