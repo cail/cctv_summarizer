@@ -383,6 +383,12 @@ class CCTVSummarizer:
             frames = []
             discarded_count = 0
             for frame_path in all_frames:
+                # Check if frame still exists (might have been cleaned up)
+                if not frame_path.exists():
+                    logger.debug(f"Frame {frame_path.name} no longer exists, skipping")
+                    discarded_count += 1
+                    continue
+                    
                 if self._has_motion(cam_id, frame_path, debug=False, save_debug_images=False):
                     frames.append(frame_path)
                 else:
@@ -395,6 +401,16 @@ class CCTVSummarizer:
                 return
         else:
             frames = all_frames
+            # Filter out non-existent frames even when motion detection is disabled
+            existing_frames = [f for f in frames if f.exists()]
+            missing_count = len(frames) - len(existing_frames)
+            if missing_count > 0:
+                logger.warning(f"{missing_count} frames no longer exist for {cam_id}, excluding from video")
+            frames = existing_frames
+            
+            if len(frames) < 2:
+                logger.info(f"Not enough existing frames to generate video for {cam_id}")
+                return
         
         # Generate video filename with current timestamp
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -407,9 +423,22 @@ class CCTVSummarizer:
         try:
             with open(input_list, 'w') as f:
                 for frame in frames:
+                    # Verify frame exists before adding to list
+                    if not frame.exists():
+                        logger.warning(f"Frame {frame.name} disappeared before video generation, skipping")
+                        continue
                     # Write absolute path to each frame
                     f.write(f"file '{frame.absolute()}'\n")
                 # ffmpeg concat demuxer will display each frame for equal time
+            
+            # Check if we still have enough frames after verification
+            # Re-read the file to count valid entries
+            with open(input_list, 'r') as f:
+                valid_frame_count = len([line for line in f if line.strip().startswith('file')])
+            
+            if valid_frame_count < 2:
+                logger.warning(f"Not enough valid frames remaining for {cam_id} after verification ({valid_frame_count})")
+                return
             
             # Get FPS from config (default: 25)
             video_fps = self.settings.get('video_fps', 25)
@@ -467,9 +496,12 @@ class CCTVSummarizer:
         except Exception as e:
             logger.error(f"Error generating video for {cam_id}: {e}")
         finally:
-            # Cleanup input list file
+            # Cleanup input list file (keep it if there was an error for debugging)
             if input_list.exists():
-                input_list.unlink()
+                try:
+                    input_list.unlink()
+                except Exception as e:
+                    logger.debug(f"Could not delete input list file: {e}")
     
     def _generate_iframe_html(self, cam_id, video_path):
         """Generate an HTML file with iframe pointing to the video"""
@@ -617,6 +649,10 @@ class CCTVSummarizer:
         """Main loop for capturing frames"""
         logger.info("Starting capture loop...")
         last_video_generation = {cam_id: time.time() for cam_id in self.cameras.keys()}
+        last_cleanup = {cam_id: time.time() for cam_id in self.cameras.keys()}
+        # Run cleanup less frequently to avoid race conditions with video generation
+        # Cleanup every 10 minutes instead of every capture interval
+        cleanup_interval = 600  # 10 minutes in seconds
         
         while True:
             try:
@@ -625,7 +661,11 @@ class CCTVSummarizer:
                 # Capture frames from all cameras
                 for cam_id, camera_config in self.cameras.items():
                     self.capture_frame(cam_id, camera_config)
-                    self.cleanup_old_frames(cam_id)
+                    
+                    # Only cleanup frames periodically, not on every capture
+                    if current_time - last_cleanup[cam_id] >= cleanup_interval:
+                        self.cleanup_old_frames(cam_id)
+                        last_cleanup[cam_id] = current_time
                     
                     # Check if it's time to generate video
                     if current_time - last_video_generation[cam_id] >= self.video_generation_interval:
